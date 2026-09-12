@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JavaScript Infinite Slider</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    .slider {
+      position: relative;
+
+      width: min(500px, 100%);
+
+      /* 5枚横並び */
+      aspect-ratio: 5 / 1;
+
+      margin: 50px auto;
+
+      overflow: hidden;
+
+      border: 1px solid #aaa;
+    }
+
+    .track {
+      position: absolute;
+      inset: 0;
+
+      display: flex;
+
+      width: 100%;
+      height: 100%;
+
+      will-change: transform;
+    }
+
+    .track li {
+      flex: 0 0 calc(100% / var(--view-count));
+
+      height: 100%;
+
+      padding: 5px;
+
+      list-style: none;
+
+      border: 1px solid #000;
+    }
+
+    .track img {
+      display: block;
+
+      width: 100%;
+      height: 100%;
+
+      object-fit: cover;
+    }
+
+    .controller {
+      text-align: center;
+    }
+
+    button {
+      padding: 8px 20px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="slider">
+    <ul class="track"></ul>
+    <ul class="track"></ul>
+    <ul class="track"></ul>
+  </div>
+
+  <div class="controller">
+    <button id="prev">prev</button>
+    <button id="next">next</button>
+  </div>
+
+  <script>
+    // ========================================================
+    // 1. 画像データ
+    // ========================================================
+
+    const imagePool = [
+      'onepiece01_luffy2.png',
+      'onepiece02_zoro_bandana.png',
+      'onepiece03_nami.png',
+      'onepiece04_usopp_sogeking.png',
+      'onepiece05_sanji.png',
+      'onepiece07_robin.png',
+      'onepiece08_franky.png',
+      'onepiece09_brook.png',
+      'onepiece10_jinbe.png',
+      'onepiece11_arlong.png',
+      'onepiece12_buggy.png',
+      'onepiece13_crocodile.png',
+      'onepiece14_enel.png',
+      'onepiece15_lucci.png',
+      'onepiece16_moria.png',
+      'onepiece17_doflamingo.png'
+    ];
+
+
+    // ========================================================
+    // 2. DOM
+    // ========================================================
+
+    const slider = document.querySelector(".slider");
+
+    /*
+      tracks[0] = prev
+      tracks[1] = current
+      tracks[2] = next
+
+      DOMそのものの順番は変えず、
+      tracks配列の論理順だけを回転させる。
+    */
+    const tracks = [
+      ...document.querySelectorAll(".track")
+    ].map(el => ({ el }));
+
+    const prevButton = document.getElementById("prev");
+    const nextButton = document.getElementById("next");
+
+
+    // ========================================================
+    // 3. 設定
+    // ========================================================
+
+    const VIEW_COUNT = 5;
+    const ANIMATION_DURATION = 300;
+    const ANIMATION_EASING = "ease";
+
+    const DIRECTION = {
+      NEXT: 1,
+      PREV: -1
+    };
+
+    slider.style.setProperty("--view-count", VIEW_COUNT);
+
+
+    // ========================================================
+    // 4. 現在表示中の先頭位置
+    //
+    // normalizeはしない。
+    // 0 → 5 → 10 → 15 → 20...
+    // 0 → -5 → -10...
+    //
+    // 実際にimagePoolへアクセスするときだけ
+    // normalizeIndex()する。
+    // ========================================================
+
+    let currentIndex = 0;
+
+
+    // ========================================================
+    // 5. indexを循環させる
+    // ========================================================
+
+    function normalizeIndex(index) {
+      return (
+        (index % imagePool.length) + imagePool.length
+      ) % imagePool.length;
+    }
+
+
+    // ========================================================
+    // 6. 指定位置からVIEW_COUNT枚取得
+    // ========================================================
+
+    function getItems(startIndex) {
+      return Array.from(
+        { length: VIEW_COUNT },
+        (_, i) => {
+          const index = normalizeIndex(startIndex + i);
+
+          return imagePool[index];
+        }
+      );
+    }
+
+
+    // ========================================================
+    // 7. trackを描画
+    //
+    // index = 0 → prev
+    // index = 1 → current
+    // index = 2 → next
+    //
+    // startIndexは配列位置から計算する。
+    // ========================================================
+
+    function renderTrack(index) {
+      const { el } = tracks[index];
+
+      /*
+        index = 0
+        currentIndex + (0 - 1) * VIEW_COUNT
+        → currentIndex - VIEW_COUNT
+
+        index = 1
+        → currentIndex
+
+        index = 2
+        → currentIndex + VIEW_COUNT
+      */
+      const startIndex =
+        currentIndex + (index - 1) * VIEW_COUNT;
+
+      const items = getItems(startIndex);
+
+      el.innerHTML = items
+        .map(img => `
+          <li>
+            <img src="./img/sliders/${img}" alt="">
+          </li>
+        `)
+        .join("");
+    }
+
+
+    // ========================================================
+    // 8. tracks配列の順番を画面位置へ反映
+    // ========================================================
+
+    function syncTrackPositions() {
+      const [prevTrack, currentTrack, nextTrack] = tracks;
+
+      const width = slider.clientWidth;
+
+      prevTrack.el.style.transform =
+        `translateX(${-width}px)`;
+
+      currentTrack.el.style.transform =
+        `translateX(0px)`;
+
+      nextTrack.el.style.transform =
+        `translateX(${width}px)`;
+    }
+
+
+    // ========================================================
+    // 9. 初期描画
+    // ========================================================
+
+    tracks.forEach((_, index) => {
+      renderTrack(index);
+    });
+
+    syncTrackPositions();
+
+
+    // ========================================================
+    // 10. 操作ロック
+    // ========================================================
+
+    let isMoving = false;
+
+    function lock() {
+      isMoving = true;
+
+      prevButton.disabled = true;
+      nextButton.disabled = true;
+    }
+
+    function unlock() {
+      isMoving = false;
+
+      prevButton.disabled = false;
+      nextButton.disabled = false;
+    }
+
+
+    // ========================================================
+    // 11. NEXT後
+    // ========================================================
+
+    function recycleNext() {
+      /*
+        [A, B, C]
+        ↓
+        [B, C, A]
+      */
+      const first = tracks.shift();
+      tracks.push(first);
+
+      /*
+        normalizeしない。
+
+        0 → 5 → 10 → 15 → 20...
+      */
+      currentIndex += VIEW_COUNT;
+
+      /*
+        新しいnextだけ再描画。
+
+        tracks[2] = next
+      */
+      renderTrack(2);
+    }
+
+
+    // ========================================================
+    // 12. PREV後
+    // ========================================================
+
+    function recyclePrev() {
+      /*
+        [A, B, C]
+        ↓
+        [C, A, B]
+      */
+      const last = tracks.pop();
+      tracks.unshift(last);
+
+      /*
+        normalizeしない。
+
+        0 → -5 → -10 → -15...
+      */
+      currentIndex -= VIEW_COUNT;
+
+      /*
+        新しいprevだけ再描画。
+
+        tracks[0] = prev
+      */
+      renderTrack(0);
+    }
+
+
+    // ========================================================
+    // 13. スライド
+    // ========================================================
+
+    async function move(direction) {
+      if (isMoving) return;
+
+      lock();
+
+      try {
+        const width = slider.clientWidth;
+
+        /*
+          tracks[0] = prev
+          tracks[1] = current
+          tracks[2] = next
+        */
+        const fromPositions = [
+          -width,
+          0,
+          width
+        ];
+
+        const animations = tracks.map((track, index) => {
+          const from = fromPositions[index];
+
+          const to =
+            from - direction * width;
+
+          return track.el.animate(
+            [
+              {
+                transform:
+                  `translateX(${from}px)`
+              },
+              {
+                transform:
+                  `translateX(${to}px)`
+              }
+            ],
+            {
+              duration: ANIMATION_DURATION,
+              easing: ANIMATION_EASING,
+              fill: "forwards"
+            }
+          );
+        });
+
+        await Promise.all(
+          animations.map(
+            animation => animation.finished
+          )
+        );
+
+
+        // ----------------------------
+        // 論理状態を更新
+        // ----------------------------
+
+        if (direction === DIRECTION.NEXT) {
+          recycleNext();
+        } else {
+          recyclePrev();
+        }
+
+
+        // ----------------------------
+        // 新しい配列順を画面位置へ反映
+        // ----------------------------
+
+        syncTrackPositions();
+
+
+        // ----------------------------
+        // animationが保持しているtransformを解除
+        // ----------------------------
+
+        animations.forEach(
+          animation => animation.cancel()
+        );
+
+      } catch (error) {
+
+        /*
+          中断された場合は
+          現在のtracks配列に従って位置を戻す。
+        */
+        syncTrackPositions();
+
+      } finally {
+
+        unlock();
+      }
+    }
+
+
+    // ========================================================
+    // 14. NEXT / PREV
+    // ========================================================
+
+    nextButton.addEventListener("click", () => {
+      move(DIRECTION.NEXT);
+    });
+
+    prevButton.addEventListener("click", () => {
+      move(DIRECTION.PREV);
+    });
+
+
+    // ========================================================
+    // 15. resize
+    // ========================================================
+
+    window.addEventListener("resize", () => {
+      if (isMoving) return;
+
+      syncTrackPositions();
+    });
+  </script>
+
+</body>
+
+</html>
