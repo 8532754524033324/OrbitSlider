@@ -4,15 +4,11 @@
 <head>
   <meta charset="UTF-8">
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>Position Infinite Slider</title>
+  <title>Position Infinite Slider (解説コメント付き)</title>
 
   <style>
-
     * {
       box-sizing: border-box;
       margin: 0;
@@ -22,6 +18,12 @@
 
     /* ========================================
        Slider
+
+       ここに3枚の .track を position:absolute で
+       完全に重ねて配置する。
+       重ねた3枚を横にずらして並べることで、
+       「前・現在・次」の3セットを同時に
+       用意しておく仕組み。
     ======================================== */
 
     .slider {
@@ -32,6 +34,7 @@
 
       margin: 50px auto;
 
+      /* 隣にはみ出したTrackを隠すための必須プロパティ */
       overflow: hidden;
 
       border: 1px solid #aaa;
@@ -40,6 +43,11 @@
 
     /* ========================================
        Track
+
+       3枚存在する。各Trackは
+       transform: translateX() だけで
+       左右に動かされる（position:absolute + inset:0 で
+       全員同じ場所からスタートする）。
     ======================================== */
 
     .track {
@@ -51,12 +59,17 @@
       width: 100%;
       height: 100%;
 
+      /* transformでの移動が多いのでブラウザに事前通知しておく */
       will-change: transform;
     }
 
 
     /* ========================================
        Item
+
+       --view-count はJS側から
+       SLIDE.setup() でセットされる
+       （1画面に何枚表示するか）。
     ======================================== */
 
     .track li {
@@ -103,13 +116,18 @@
 
       cursor: default;
     }
-
   </style>
 </head>
 
 
 <body>
 
+  <!--
+    .track を3つ並べているが、これは
+    「前・現在・次」の3セットの入れ物。
+    どれがどの役割かはJS側の position プロパティで決まり、
+    DOMの並び順そのものには意味がない。
+  -->
   <div class="slider">
 
     <ul class="track"></ul>
@@ -136,6 +154,11 @@
 
     // ========================================
     // 1. Data
+    //
+    // この配列は最後まで並べ替えない。
+    // 「どこから何枚切り出して見せるか」を
+    // 表示側（SLIDE）で計算することで
+    // 無限ループを表現する。
     // ========================================
 
     const imagePool = [
@@ -166,6 +189,10 @@
       document.querySelector(".slider");
 
 
+    // 3つの .track 要素。
+    // trackElements[0] / [1] / [2] は
+    // 最後まで同じDOM要素を指し続ける
+    // （並べ替えたり作り直したりしない）。
     const trackElements =
       document.querySelectorAll(".track");
 
@@ -192,6 +219,20 @@
 
     // ========================================
     // 4. Index normalize
+    //
+    // 配列の範囲(0 〜 length-1)からはみ出た
+    // 添字を、循環させて範囲内に丸め込む。
+    //
+    // JSの % は負の数を渡すと負の値を返すため
+    // (-1 % 16 === -1)、そのままでは配列の添字に
+    // 使えない。
+    //   1. index % length         → 範囲を -length+1〜length-1 に縮める
+    //   2. + length                → 全体を正方向にずらして負値を消す
+    //   3. % length（再度）         → ずらしすぎた分をもう一度丸める
+    // という3段階の計算で、常に 0〜length-1 に収める。
+    //
+    // この関数自体は「今どこを見ているか」という
+    // 状態を一切持たない、ただの純粋な計算。
     // ========================================
 
     function normalizeIndex(index) {
@@ -207,22 +248,36 @@
     // ========================================
     // 5. Slide
     //
-    // VIEW_COUNT と currentIndex は
+    // VIEW_COUNT と currentStep は
     // SLIDEの中だけで管理する。
+    //
+    // ここが「今何ステップ目を表示しているか」を
+    // 一元管理する唯一の場所。
+    // 各Trackはこの currentStep を直接知らず、
+    // 自分の相対位置(position)だけを持つ
+    // （方式の違いは下の getSlicedImgPool 付近を参照）。
     // ========================================
 
     const SLIDE = (() => {
 
+      // 1画面に同時に表示する画像の枚数
       const VIEW_COUNT =
         5;
 
 
-      let currentIndex =
+      // 「今何ステップ進んだか」を表す唯一のカウンタ。
+      // 1ステップ = VIEW_COUNT枚分のスライド。
+      let currentStep =
         0;
 
 
       // ----------------------------------------
       // NEXT
+      //
+      // positionStep: このアクションで各Trackの
+      // position をどれだけ動かすか
+      //（"次へ"なので画像は左へ、
+      //   つまりTrackは -1 方向へ動く）
       // ----------------------------------------
 
       const NEXT = {
@@ -230,10 +285,9 @@
         positionStep: -1,
 
 
-        updateCurrentIndex() {
+        updateCurrentStep() {
 
-          currentIndex +=
-            VIEW_COUNT;
+          currentStep++;
 
         }
 
@@ -249,10 +303,9 @@
         positionStep: 1,
 
 
-        updateCurrentIndex() {
+        updateCurrentStep() {
 
-          currentIndex -=
-            VIEW_COUNT;
+          currentStep--;
 
         }
 
@@ -260,14 +313,45 @@
 
 
       // ----------------------------------------
-      // positionから表示画像を取得
+      // stepから画像開始indexを循環取得
+      //
+      // 例: VIEW_COUNT=5 のとき
+      //   step=0 → 開始index 0
+      //   step=1 → 開始index 5
+      //   step=-1 → 開始index -5 → normalizeIndexで循環
       // ----------------------------------------
 
-      function getItems(position) {
+      function cycleIndex(step) {
 
-        const startIndex =
-          currentIndex
-          + position * VIEW_COUNT;
+        return normalizeIndex(
+          step * VIEW_COUNT
+        );
+
+      }
+
+
+      // ----------------------------------------
+      // positionから表示画像を切り出す
+      //
+      // position(-1/0/1)を受け取り、
+      // 「currentStepから見てpositionだけ
+      //   ずれた位置のVIEW_COUNT枚」を
+      // imagePoolから切り出して返す。
+      //
+      // ★ここが「currentIndexで1枚ずつ管理する方式」
+      //   ではなく「positionで相対管理する方式」の
+      //   中心部分。currentStep(絶対位置)は
+      //   SLIDEだけが知っていて、
+      //   Track側は自分の相対位置(position)を
+      //   渡すだけで良い設計になっている。
+      // ----------------------------------------
+
+      function getSlicedImgPool(position) {
+
+        const start =
+          cycleIndex(
+            currentStep + position
+          );
 
 
         return Array.from(
@@ -279,7 +363,7 @@
 
             const index =
               normalizeIndex(
-                startIndex + i
+                start + i
               );
 
 
@@ -308,7 +392,8 @@
       return {
         NEXT,
         PREV,
-        getItems,
+        cycleIndex,
+        getSlicedImgPool,
         setup
       };
 
@@ -324,6 +409,11 @@
     //   position
     //
     // だけ。
+    //
+    // 「今どの画像を表示しているか」という
+    // データ的な情報は一切持たず、
+    // 「自分は真ん中から見て何番目にいるか」という
+    // 相対位置だけを持つ。
     // ========================================
 
     class Track {
@@ -348,6 +438,16 @@
 
       // ----------------------------------------
       // Animation
+      //
+      // このメソッドの中では this.position を
+      // まだ書き換えない。
+      //
+      // アニメーションが正常に終わるかどうかは
+      // この時点ではわからない（リサイズや
+      // エラーで中断される可能性がある）ため、
+      // 見た目(transform)だけを先に動かし、
+      // データ(position)の確定は commit() まで
+      // 保留する。
       // ----------------------------------------
 
       animate(slide, width) {
@@ -392,6 +492,16 @@
           to はローカル変数だが、
           commit() がクロージャとして保持する。
 
+          animate()の実行自体はここで終わっても、
+          commit()がtoを参照し続ける限り
+          toはメモリ上に残り続ける（クロージャ）。
+
+          こうしてTrackごとに「確定すべき値」を
+          関数の中に閉じ込めて持ち運ぶことで、
+          3つのTrackを同時に動かしても
+          どのTrackのtoがどの値だったかを
+          取り違えずに済む。
+
           Animation終了後に
           positionを正式に更新する。
         */
@@ -425,6 +535,13 @@
       // 反対側の端へ回す。
       //
       // 補正が発生した場合だけ true。
+      //
+      // ★呼び出し側(move())は、この戻り値を
+      //   そのまま「再描画が必要かどうか」の
+      //   判定に使っている。3枚のうち
+      //   反対端に回ったTrackだけが
+      //   表示すべき画像の中身が変わるため、
+      //   そのTrackだけをrenderTrackし直せば済む。
       // ----------------------------------------
 
       updatePosition(position) {
@@ -478,6 +595,12 @@
 
           -Math.sign(2)
           → -1
+
+          「符号だけを取り出して反転する」ことで、
+          範囲を超えた数値の大きさに関係なく
+          必ず -1 か 1 に丸め込める
+          （1ステップにつき1しか動かない設計なので
+            2を超えることはない前提）。
         */
 
         this.position =
@@ -498,6 +621,11 @@
 
       // ----------------------------------------
       // 現在のpositionへ配置
+      //
+      // アニメーションを使わず、
+      // 即座にその位置へ配置し直すためのメソッド。
+      // 初期表示・リサイズ時・エラー時の
+      // 巻き戻しに使う。
       // ----------------------------------------
 
       setPosition(width) {
@@ -558,22 +686,28 @@
     // ========================================
     // 8. Track Render
     //
-    // currentIndex や VIEW_COUNT は
+    // currentStep や VIEW_COUNT は
     // renderTrackでは扱わない。
     //
     // positionだけSLIDEへ渡す。
+    //
+    // ★このTrackが「今どの画像を表示すべきか」を
+    //   知っているのはSLIDE側だけで、
+    //   renderTrackはそれを教えてもらって
+    //   そのままDOMに反映するだけ、という
+    //   役割分担になっている。
     // ========================================
 
     function renderTrack(track) {
 
-      const items =
-        SLIDE.getItems(
+      const slicedImgs =
+        SLIDE.getSlicedImgPool(
           track.position
         );
 
 
       track.el.innerHTML =
-        items
+        slicedImgs
           .map(img => `
             <li>
               <img
@@ -631,6 +765,11 @@
 
     // ========================================
     // 11. Lock
+    //
+    // isMoving は「今アニメーション中かどうか」を
+    // 表すだけのシンプルなフラグ。
+    // これによりアニメーション中の連打を無視し、
+    // Trackの状態が壊れるのを防ぐ。
     // ========================================
 
     let isMoving =
@@ -704,6 +843,7 @@
         // Animation開始
         //
         // まだpositionは変更しない。
+        // 見た目(transform)だけを先に動かす。
         // --------------------------------------
 
         animations =
@@ -719,6 +859,9 @@
 
         // --------------------------------------
         // 全Animation終了待ち
+        //
+        // 3つのTrackが同時に動くので、
+        // 全部が終わるまでPromise.allで待つ。
         // --------------------------------------
 
         await Promise.all(
@@ -732,10 +875,14 @@
 
 
         // --------------------------------------
-        // currentIndex更新
+        // currentStep更新
+        //
+        // アニメーションが正常に終わったことが
+        // 確認できた、このタイミングで初めて
+        // SLIDEの「現在地」を進める。
         // --------------------------------------
 
-        slide.updateCurrentIndex();
+        slide.updateCurrentStep();
 
 
         // --------------------------------------
@@ -745,7 +892,8 @@
         // commit()をここで遅延実行。
         //
         // positionが反対端へ回ったTrackだけ
-        // Track自身が返る。
+        // Track自身が返る
+        // （updatePosition()がtrueを返した場合のみ）。
         // --------------------------------------
 
         animations.forEach(animation => {
@@ -756,6 +904,11 @@
 
           if (updatedTrack) {
 
+            // 反対端に回ったTrackだけ、
+            // 表示すべき画像の中身が変わっているので
+            // ここで初めて再描画する。
+            // それ以外の2枚は位置が変わっただけで
+            // 中身はすでに正しいため触らない。
             renderTrack(
               updatedTrack
             );
@@ -767,6 +920,10 @@
 
         // --------------------------------------
         // 新しいpositionへ正式配置
+        //
+        // Web Animations APIのアニメーションは
+        // 一時的なものなので、確定した position を
+        // 元にCSSのtransformとして正式に上書きする。
         // --------------------------------------
 
         setTrackPositions();
@@ -774,6 +931,11 @@
 
         // --------------------------------------
         // Animation解除
+        //
+        // fill:"forwards"で残っていた
+        // アニメーションの効果を解除する
+        // （setTrackPositionsで上書き済みのため
+        //   このタイミングで消してよい）。
         // --------------------------------------
 
         animations.forEach(animation => {
@@ -845,6 +1007,11 @@
 
     // ========================================
     // 14. Resize
+    //
+    // アニメーション中(isMoving)は
+    // リサイズによる位置の再計算をスキップする。
+    // アニメーション中にtransformを上書きすると
+    // 見た目が一瞬崩れてしまうため。
     // ========================================
 
     window.addEventListener(
