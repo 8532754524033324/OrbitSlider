@@ -1,0 +1,107 @@
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+
+    /* ========================================
+       Slider
+
+       ここに3枚の .track を position:absolute で
+       完全に重ねて配置する。
+       重ねた3枚を横にずらして並べることで、
+       「前・現在・次」の3セットを同時に
+       用意しておく仕組み。
+    ======================================== */
+
+    .slider {
+      position: relative;
+
+      width: min(500px, 100%);
+      aspect-ratio: 5 / 1;
+
+      margin: 50px auto;
+
+      /* 隣にはみ出したTrackを隠すための必須プロパティ */
+      overflow: hidden;
+
+      border: 1px solid #aaa;
+    }
+
+
+    /* ========================================
+       Track
+
+       3枚存在する。各Trackは
+       transform: translateX() だけで
+       左右に動かされる（position:absolute + inset:0 で
+       全員同じ場所からスタートする）。
+    ======================================== */
+
+    .track {
+      position: absolute;
+      inset: 0;
+
+      display: flex;
+
+      width: 100%;
+      height: 100%;
+
+      /* transformでの移動が多いのでブラウザに事前通知しておく */
+      will-change: transform;
+    }
+
+
+    /* ========================================
+       Item
+
+       --view-count はJS側から
+       SLIDE.setup() でセットされる
+       （1画面に何枚表示するか）。
+    ======================================== */
+
+    .track li {
+      flex: 0 0 calc(100% / var(--view-count));
+
+      height: 100%;
+
+      padding: 5px;
+
+      list-style: none;
+
+      border: 1px solid #000;
+    }
+
+
+    .track img {
+      display: block;
+
+      width: 100%;
+      height: 100%;
+
+      object-fit: cover;
+    }
+
+
+    /* ========================================
+       Controller
+    ======================================== */
+
+    .controller {
+      text-align: center;
+    }
+
+
+    button {
+      padding: 8px 20px;
+
+      cursor: pointer;
+    }
+
+
+    button:disabled {
+      opacity: 0.5;
+
+      cursor: default;
+    }
