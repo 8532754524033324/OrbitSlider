@@ -6,48 +6,697 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>Position Infinite Slider (解説コメント付き)</title>
-  <link rel="stylesheet" href="./style.css">
-  <script type="module" src="./script.js"></script>
+  <title>Position Infinite Slider (item単位版)</title>
 
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+
+    /* ========================================
+       Slider
+    ======================================== */
+
+    .slider {
+      position: relative;
+
+      width: min(500px, 100%);
+      aspect-ratio: 5 / 1;
+
+      margin: 50px auto;
+
+      /* 視界の外にいるitemを隠す */
+      overflow: hidden;
+
+      border: 1px solid #aaa;
+    }
+
+
+    /* ========================================
+       Track
+
+       .track自体はただの入れ物(position:relative)。
+       3本あったTrackを1本に統合したので、
+       flexで横並びにする必要はなくなった。
+       各itemが自分の position を元に
+       自分自身でtranslateXするため。
+    ======================================== */
+
+    .track {
+      position: relative;
+
+      width: 100%;
+      height: 100%;
+    }
+
+
+    /* ========================================
+       Item
+
+       1個 = 画像1枚。
+       VIEW_COUNT + MOVE_COUNT*2 個ぶん生成し、
+       生成後はDOMの並び順を一切変えない
+       （appendChildによる付け替えはしない）。
+       表示上の移動はすべて position(個々のtransform)で行う。
+    ======================================== */
+
+    .item {
+      position: absolute;
+      top: 0;
+      left: 0;
+
+      width: calc(100% / var(--view-count));
+      height: 100%;
+
+      padding: 5px;
+
+      will-change: transform;
+    }
+
+
+    .item .frame {
+      width: 100%;
+      height: 100%;
+
+      border: 1px solid #000;
+      box-sizing: border-box;
+    }
+
+
+    .item img {
+      display: block;
+
+      width: 100%;
+      height: 100%;
+
+      object-fit: cover;
+    }
+
+
+    /* ========================================
+       Controller
+    ======================================== */
+
+    .controller {
+      text-align: center;
+    }
+
+
+    button {
+      padding: 8px 20px;
+
+      cursor: pointer;
+    }
+
+
+    button:disabled {
+      opacity: 0.5;
+
+      cursor: default;
+    }
+  </style>
 </head>
 
 
 <body>
 
-    <header style="max-width: 500px; margin: 30px auto 0; padding: 0 10px; text-align: center;">
-    <h1 style="font-size: 1.2rem; margin-bottom: 8px;">Position Infinite Slider</h1>
+  <header style="max-width: 500px; margin: 30px auto 0; padding: 0 10px; text-align: center;">
+    <h1 style="font-size: 1.2rem; margin-bottom: 8px;">Position Infinite Slider（item単位版）</h1>
     <p style="font-size: 0.85rem; color: #555; line-height: 1.6;">
-       3枚のDOM（.track）が持つ相対位置（position: -1 / 0 / 1）だけを
-       dom同士でまわしあって無限ループを表現するスライダーのサンプルです。
+      1本のTrackの中でitem(画像1枚単位)ごとに
+      positionを持たせて循環させる。
+      DOMの並び替え(appendChild)は行いません。
     </p>
   </header>
 
-  <!--
-    .track を3つ並べているが、これは
-    「前・現在・次」の3セットの入れ物。
-    どれがどの役割かはJS側の position プロパティで決まり、
-    DOMの並び順そのものには意味がない。
-  -->
-  <div class="slider">
-
+  <div class="slider" data-slider>
     <ul class="track"></ul>
-    <ul class="track"></ul>
-    <ul class="track"></ul>
-
   </div>
-
 
   <div class="controller">
-
-    <button id="prev">
-      prev
-    </button>
-
-    <button id="next">
-      next
-    </button>
-
+    <button data-prev>prev</button>
+    <button data-next>next</button>
   </div>
+
+
+  <script>
+
+    // ========================================
+    // 1. Data
+    // ========================================
+
+    const imagePool = [
+      "onepiece01_luffy2.png",
+      "onepiece02_zoro_bandana.png",
+      "onepiece03_nami.png",
+      "onepiece04_usopp_sogeking.png",
+      "onepiece05_sanji.png",
+      "onepiece07_robin.png",
+      "onepiece08_franky.png",
+      "onepiece09_brook.png",
+      "onepiece10_jinbe.png",
+      "onepiece11_arlong.png",
+      "onepiece12_buggy.png",
+      "onepiece13_crocodile.png",
+      "onepiece14_enel.png",
+      "onepiece15_lucci.png",
+      "onepiece16_moria.png",
+      "onepiece17_doflamingo.png"
+    ];
+
+
+    // ========================================
+    // 2. Item
+    //
+    // 旧Trackが「VIEW_COUNT枚ひとまとめのページ」を
+    // 持っていたのに対し、Itemは「画像1枚」だけを持つ。
+    //
+    // position の取りうる範囲は
+    //
+    //   -MOVE_COUNT 〜 (VIEW_COUNT - 1 + MOVE_COUNT)
+    //
+    // で、内訳は
+    //
+    //   0 〜 VIEW_COUNT-1        … 今見えている範囲
+    //   -MOVE_COUNT 〜 -1        … 左側のバッファ
+    //   VIEW_COUNT 〜 +MOVE_COUNT分 … 右側のバッファ
+    //
+    // という3つの区間がそのまま連続した整数になっている。
+    //
+    // 「見えている範囲はそのまま連番、外側は端からの距離」
+    // という、会話で出てきた getPosition() の考え方を
+    // そのまま体現しているのがこの position の並びで、
+    // 左右のバッファがそれぞれ MOVE_COUNT 個しかないので
+    // 端からの距離を別途圧縮して求め直す必要がない
+    // （圧縮しなくても、この range 自体がすでに
+    //   「範囲外に出た量」をそのまま表している）。
+    // ========================================
+
+    class Item {
+
+      constructor(el, position, slider) {
+
+        this.el = el;
+        this.position = position;
+        this.slider = slider;
+
+        /*
+          DOM構造(frame + img)は最初に1回だけ作る。
+          以後render()を何度呼んでも、
+          innerHTMLで作り直すのではなく
+          このimg要素のsrcだけを差し替える。
+        */
+
+        this.el.innerHTML =
+          `<div class="frame"><img alt=""></div>`;
+
+        this.imgEl =
+          this.el.querySelector("img");
+
+      }
+
+
+      // ----------------------------------------
+      // 自分のpositionが指す画像を表示する
+      // ----------------------------------------
+
+      render() {
+
+        const img =
+          this.slider.getImage(
+            this.position
+          );
+
+
+        this.imgEl.src =
+          `./img/${img}`;
+
+      }
+
+
+      // ----------------------------------------
+      // Animation
+      //
+      // 旧Track.animateと同じ構造。
+      // 動く粒度が「1ページ分」から「1枚分」に
+      // 変わっただけ。
+      // ----------------------------------------
+
+      animate(positionStep) {
+
+        const from =
+          this.position;
+
+
+        const to =
+          this.position
+          + positionStep;
+
+
+        const width =
+          this.slider.itemWidth;
+
+
+        const animation =
+          this.el.animate(
+            [
+              {
+                transform:
+                  `translateX(${from * width}px)`
+              },
+
+              {
+                transform:
+                  `translateX(${to * width}px)`
+              }
+            ],
+
+            {
+              duration:
+                Slider.ANIMATION_DURATION,
+
+              easing:
+                Slider.ANIMATION_EASING,
+
+              fill:
+                "forwards"
+            }
+          );
+
+
+        /*
+          commit()の中で、position確定と
+          必要なら再描画までを1つの仕事として行う。
+
+          MOVE_COUNT(=1回に動かす枚数)が2以上だと、
+          境界を一気に複数個ぶん超えることがあるため、
+          -Math.sign や単純な ± itemTotal では足りない。
+          normalizeIndexと同じ「剰余で丸め込む」考え方に
+          一般化する。
+        */
+
+        animation.commit = () => {
+
+          this.position =
+            to;
+
+
+          const min =
+            -this.slider.moveCount;
+
+          const max =
+            this.slider.maxPosition;
+
+
+          if (
+            this.position < min
+            || this.position > max
+          ) {
+
+            const range =
+              this.slider.itemTotal;
+
+
+            // min を基準に0スタートへずらし、
+            // 剰余で範囲内へ丸め込んでから
+            // 再び min 基準へ戻す
+            this.position =
+              min
+              + (
+                (
+                  (this.position - min) % range
+                )
+                + range
+              ) % range;
+
+
+            this.render();
+
+          }
+
+        };
+
+
+        return animation;
+
+      }
+
+
+      // ----------------------------------------
+      // 現在のpositionへ即座に配置
+      // ----------------------------------------
+
+      setPosition() {
+
+        this.el.style.transform =
+          `translateX(${this.position * this.slider.itemWidth}px)`;
+
+      }
+
+    }
+
+
+    // ========================================
+    // 3. Slider
+    //
+    // VIEW_COUNT … 実際に画面に見えている枚数
+    // MOVE_COUNT … 1回の操作(NEXT/PREV)で
+    //              何枚動かすか。
+    //
+    //              バッファ(見えている範囲の外側に
+    //              待機させておく枚数)も、この値と
+    //              同じ枚数だけあれば必要十分。
+    //              1回の移動でpositionが最大MOVE_COUNT
+    //              しか動かない以上、それ以上のバッファを
+    //              持つ理由がないため、MOVE_COUNTが
+    //              1つの値で両方の役割を兼ねる。
+    // ========================================
+
+    class Slider {
+
+      static ANIMATION_DURATION = 300;
+      static ANIMATION_EASING = "ease";
+
+      #el;
+      #imagePool;
+      #viewCount;
+      #moveCount;
+      #currentStep = 0; // 画像1枚単位で進む/戻る（旧: ページ単位だった）
+      #itemWidth;
+      #items;
+      #isMoving = false;
+
+
+      constructor(el, imagePool, viewCount = 5, moveCount = 2) {
+
+        this.#el = el;
+        this.#imagePool = imagePool;
+        this.#viewCount = viewCount;
+        this.#moveCount = moveCount;
+
+        this.#itemWidth =
+          el.clientWidth / viewCount;
+
+        el.style.setProperty(
+          "--view-count",
+          viewCount
+        );
+
+
+        const track =
+          el.querySelector(".track");
+
+
+        /*
+          ここでitem要素をDOMへ追加するのは
+          初期化時の1回だけ。
+          以後、move()を何度呼んでも
+          appendChild等でのDOM並べ替えは一切行わない。
+          動きはすべて各Itemのtransformで表現する。
+        */
+
+        this.#items =
+          Array.from(
+            {
+              length:
+                viewCount + moveCount * 2
+            },
+
+            (_, i) => {
+
+              // -MOVE_COUNT 〜 (VIEW_COUNT-1+MOVE_COUNT) の
+              // 連番をそのまま初期positionとして割り当てる
+              const position =
+                i - moveCount;
+
+
+              const itemEl =
+                document.createElement("li");
+
+              itemEl.classList.add("item");
+
+              track.appendChild(itemEl);
+
+
+              return new Item(
+                itemEl,
+                position,
+                this
+              );
+
+            }
+          );
+
+
+        this.#items.forEach(item => item.render());
+
+        this.setItemPositions();
+
+
+        const controller =
+          el.nextElementSibling;
+
+        controller
+          ?.querySelector("[data-next]")
+          ?.addEventListener("click", () => this.move(-moveCount));
+
+        controller
+          ?.querySelector("[data-prev]")
+          ?.addEventListener("click", () => this.move(moveCount));
+
+
+        window.addEventListener("resize", () => {
+
+          this.#itemWidth =
+            el.clientWidth / viewCount;
+
+
+          if (this.#isMoving) {
+            return;
+          }
+
+
+          this.setItemPositions();
+
+        });
+
+      }
+
+
+      // ----------------------------------------
+      // 各種公開プロパティ
+      //
+      // Itemはこれらを通してSliderへ問い合わせる。
+      // ----------------------------------------
+
+      get itemWidth() {
+
+        return this.#itemWidth;
+
+      }
+
+
+      get moveCount() {
+
+        return this.#moveCount;
+
+      }
+
+
+      // positionが取りうる右側の上限
+      get maxPosition() {
+
+        return (
+          this.#viewCount
+          - 1
+          + this.#moveCount
+        );
+
+      }
+
+
+      // 生成しているItemの総数
+      // (= positionが取りうる範囲の幅)
+      get itemTotal() {
+
+        return (
+          this.#viewCount
+          + this.#moveCount * 2
+        );
+
+      }
+
+
+      // ----------------------------------------
+      // normalizeIndex
+      // ----------------------------------------
+
+      #normalizeIndex(index) {
+
+        const length =
+          this.#imagePool.length;
+
+
+        return (
+          (index % length)
+          + length
+        ) % length;
+
+      }
+
+
+      // ----------------------------------------
+      // 自分のpositionから、表示すべき画像を1枚求める
+      //
+      // 旧getSlicedImgPoolは「VIEW_COUNT枚まとめて」
+      // 返していたが、item単位になったので
+      // 1枚だけ返せばよい。
+      // ----------------------------------------
+
+      getImage(position) {
+
+        const index =
+          this.#normalizeIndex(
+            this.#currentStep + position
+          );
+
+
+        return this.#imagePool[index];
+
+      }
+
+
+      // ----------------------------------------
+      // 全Itemを現在のpositionへ正式配置
+      // ----------------------------------------
+
+      setItemPositions() {
+
+        this.#items.forEach(item => {
+
+          item.setPosition();
+
+        });
+
+      }
+
+
+      // ----------------------------------------
+      // move
+      //
+      // positionStep には
+      //
+      //   -MOVE_COUNT … 次へ(NEXT)
+      //    MOVE_COUNT … 前へ(PREV)
+      //
+      // が渡される。基本の流れは旧moveと同じ。
+      // ----------------------------------------
+
+      async move(positionStep) {
+
+        if (this.#isMoving) {
+          return;
+        }
+
+
+        this.#isMoving = true;
+
+
+        let animations = [];
+
+
+        try {
+
+          animations =
+            this.#items.map(item => {
+
+              return item.animate(
+                positionStep
+              );
+
+            });
+
+
+          await Promise.all(
+
+            animations.map(
+              animation =>
+                animation.finished
+            )
+
+          );
+
+
+          // currentStepも画像1枚単位で進む
+          this.#currentStep += positionStep;
+
+
+          animations.forEach(animation => {
+
+            animation.commit();
+
+          });
+
+
+          this.setItemPositions();
+
+
+          animations.forEach(animation => {
+
+            animation.cancel();
+
+          });
+
+        }
+
+
+        catch (error) {
+
+          this.setItemPositions();
+
+
+          animations.forEach(animation => {
+
+            animation.cancel();
+
+          });
+
+        }
+
+
+        finally {
+
+          this.#isMoving = false;
+
+        }
+
+      }
+
+    }
+
+
+    // ========================================
+    // 4. インスタンス化
+    //
+    // 第4引数がMOVE_COUNT。
+    // 大きくするほど、1回のNEXT/PREVで
+    // 一気に多くの枚数がスライドする代わりに、
+    // 同時に保持するDOM要素数(VIEW_COUNT + MOVE_COUNT*2)
+    // も増える。
+    // ========================================
+
+    new Slider(
+      document.querySelector("[data-slider]"),
+      imagePool,
+      5,  // VIEW_COUNT
+      5   // MOVE_COUNT
+    );
+
+  </script>
+
 </body>
+
 </html>
